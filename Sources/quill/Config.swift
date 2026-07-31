@@ -10,6 +10,18 @@ import Foundation
 ///         "model": "large-v3-v20240930_turbo",  // whisper only
 ///         "language": "it"                // whisper only; omit for auto-detect
 ///       },
+///       "analysis": {
+///         "enabled": true,
+///         "sections": ["summary","action_items","decisions","topics","qa","keywords"]
+///       },
+///       "llm": {
+///         "engine": "openai",
+///         "base_url": "http://localhost:11434/v1",
+///         "api_key": "",
+///         "model": "qwen3.6:35b",
+///         "temperature": 0.2,
+///         "max_tokens": 64000
+///       },
 ///       "mic_voice_processing": true,
 ///       "on_stop": "my-hook"
 ///     }
@@ -68,6 +80,65 @@ enum Config {
 
     private static func transcription() -> [String: Any]? {
         load()?["transcription"] as? [String: Any]
+    }
+
+    // MARK: - Analysis
+
+    /// Whether AI analysis runs automatically after each transcript is
+    /// written. Default on — set `analysis.enabled: false` to skip.
+    static func analysisEnabled() -> Bool {
+        analysis()?["enabled"] as? Bool ?? true
+    }
+
+    /// Which analysis sections to generate. Defaults to all six. Values must
+    /// match `AnalysisSection` raw values.
+    static func llmSections() -> [AnalysisSection] {
+        guard let raw = analysis()?["sections"] as? [String], !raw.isEmpty else {
+            return AnalysisSection.allCases
+        }
+        return raw.compactMap { AnalysisSection(rawValue: $0) }
+    }
+
+    private static func analysis() -> [String: Any]? {
+        load()?["analysis"] as? [String: Any]
+    }
+
+    // MARK: - LLM
+
+    /// Configured LLM engine name. "openai" ships today (any
+    /// OpenAI-compatible endpoint: Ollama, OpenRouter, OpenAI). Unknown
+    /// values warn and fall back to openai.
+    static func llmEngine() -> String {
+        llm()?["engine"] as? String ?? "openai"
+    }
+
+    /// OpenAI-compatible base URL. Default is a local Ollama server.
+    static func llmBaseURL() -> String {
+        llm()?["base_url"] as? String ?? "http://localhost:11434/v1"
+    }
+
+    /// API key. nil for local Ollama (no auth needed).
+    static func llmAPIKey() -> String? {
+        guard let key = llm()?["api_key"] as? String, !key.isEmpty else { return nil }
+        return key
+    }
+
+    /// Model name. Any string the endpoint accepts — Ollama model tags
+    /// (`qwen3.6:35b`), OpenAI model IDs (`gpt-4o`), etc.
+    static func llmModel() -> String {
+        llm()?["model"] as? String ?? "llama3"
+    }
+
+    static func llmTemperature() -> Double {
+        llm()?["temperature"] as? Double ?? 0.3
+    }
+
+    static func llmMaxTokens() -> Int {
+        llm()?["max_tokens"] as? Int ?? 4096
+    }
+
+    private static func llm() -> [String: Any]? {
+        load()?["llm"] as? [String: Any]
     }
 
     /// Apple voice processing (acoustic echo cancellation) on the mic, so

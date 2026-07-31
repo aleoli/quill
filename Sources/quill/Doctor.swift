@@ -21,6 +21,7 @@ enum DoctorReport {
             checkSystemAudio(),
             checkRecordingsRoot(recordingsRoot),
             checkTranscription(),
+            checkLLM(),
         ]
     }
 
@@ -125,6 +126,62 @@ enum DoctorReport {
             name: "transcription",
             status: .warn("whisper models not downloaded (model: \(model), ~600 MB+)"),
             remediation: "downloads automatically on first transcription — record a short test session while online"
+        )
+    }
+
+    /// Check that the configured LLM endpoint is reachable. Analysis is
+    /// optional, so a failure here is a warning, not a hard fail — quill
+    /// still records and transcribes without it.
+    static func checkLLM() -> Check {
+        guard Config.analysisEnabled() else {
+            return Check(
+                name: "llm",
+                status: .ok,
+                remediation: nil
+            )
+        }
+        let baseURL = Config.llmBaseURL()
+        guard let url = URL(string: baseURL) else {
+            return Check(
+                name: "llm",
+                status: .fail("invalid base_url \"\(baseURL)\""),
+                remediation: "set llm.base_url in ~/.config/quill/config.json"
+            )
+        }
+        let model = Config.llmModel()
+        let probe = url.appendingPathComponent("models")
+        var req = URLRequest(url: probe, timeoutInterval: 5)
+        req.httpMethod = "GET"
+        if let key = Config.llmAPIKey() {
+            req.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
+        }
+        let sem = DispatchSemaphore(value: 0)
+        var result: (Int?, Data)?
+        let task = URLSession.shared.dataTask(with: req) { data, response, _ in
+            result = ((response as? HTTPURLResponse)?.statusCode, data ?? Data())
+            sem.signal()
+        }
+        task.resume()
+        _ = sem.wait(timeout: .now() + 6)
+        guard let (codeOpt, _) = result else {
+            return Check(
+                name: "llm",
+                status: .warn("endpoint \(baseURL) not reachable"),
+                remediation: "start the LLM server (e.g. `ollama serve`) or set llm.base_url"
+            )
+        }
+        guard let code = codeOpt, code == 200 else {
+            let reported = codeOpt.map { "\($0)" } ?? "no response"
+            return Check(
+                name: "llm",
+                status: .warn("endpoint \(baseURL) returned HTTP \(reported)"),
+                remediation: "check llm.base_url and llm.api_key in config"
+            )
+        }
+        return Check(
+            name: "llm",
+            status: .ok,
+            remediation: "endpoint \(baseURL) reachable, model \(model)"
         )
     }
 
