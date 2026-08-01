@@ -1,15 +1,23 @@
+import CoreAudio
 import Foundation
 
 /// One meeting recording: a timestamped folder holding two independent tracks
 /// (mic = you, system = them) plus a meta.json written on clean stop. Tracks
 /// are separate on purpose — whisper does better on clean single-source audio,
 /// and two tracks give free two-party diarization.
-final class RecordingSession {
+///
+/// `@unchecked Sendable`: the session is created on the main actor and its
+/// `start()` runs partially on a background queue (the mic engine start).
+/// Access is serialized — `start()` completes before `stop()` can be called
+/// (the `starting` flag in `AppController` prevents concurrent starts).
+final class RecordingSession: @unchecked Sendable {
     let dir: URL
     let startedAt = Date()
 
     private let mic = MicRecorder()
     private let system = SystemAudioRecorder()
+    /// Selected mic device id (current process lifetime). nil = system default.
+    private let micDeviceID: AudioDeviceID?
 
     private static let folderFormat: DateFormatter = {
         let f = DateFormatter()
@@ -19,8 +27,9 @@ final class RecordingSession {
     }()
 
     /// Create the session folder under `root` (yyyy.MM.dd-HHmm, suffixed on
-    /// collision) without starting capture yet.
-    init(root: URL) throws {
+    /// collision) without starting capture yet. `micDeviceID` selects the
+    /// input device for the mic track; nil follows the system default.
+    init(root: URL, micDeviceID: AudioDeviceID? = nil) throws {
         let base = Self.folderFormat.string(from: startedAt)
         var candidate = root.appendingPathComponent(base, isDirectory: true)
         var n = 2
@@ -30,14 +39,20 @@ final class RecordingSession {
         }
         try FileManager.default.createDirectory(at: candidate, withIntermediateDirectories: true)
         dir = candidate
+        self.micDeviceID = micDeviceID
     }
 
     /// Start both tracks. If the mic fails after the system tap started, the
-    /// tap is torn down so we never run half a session silently.
-    func start() throws {
+    /// tap is torn down so we never run half a session silently. Async because
+    /// the mic's `AVAudioEngine.start()` runs on a background queue (it can
+    /// block when binding to a non-default device).
+    func start() async throws {
         try system.start(writingTo: dir.appendingPathComponent("system.caf"))
         do {
-            try mic.start(writingTo: dir.appendingPathComponent("mic.caf"))
+            try await mic.start(
+                writingTo: dir.appendingPathComponent("mic.caf"),
+                deviceID: micDeviceID
+            )
         } catch {
             system.stop()
             throw error

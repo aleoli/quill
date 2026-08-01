@@ -164,12 +164,26 @@ final class AppController {
     private let transcription = TranscriptionCoordinator()
     private var session: RecordingSession?
     private var ticker: Timer?
+    /// True while a recording is starting up (engine start runs on a background
+    /// queue). Prevents the user from double-clicking "Start recording" and
+    /// launching a second session before the first engine has settled.
+    private var starting = false
+    /// Persisted mic device UID (nil = system default). Resolved to an
+    /// AudioDeviceID at recording start, since the id is only valid for the
+    /// current process lifetime.
+    private var selectedMicUID: String?
 
     init(root: URL) {
         self.root = root
+        let persistedUID = State.micDeviceUID()
+        self.selectedMicUID = persistedUID
+        menuBar.setSelectedMicUID(persistedUID)
         menuBar.onToggle = { [weak self] in self?.toggle() }
         menuBar.onOpenFolder = { [weak self] in self?.openFolder() }
         menuBar.onQuit = { [weak self] in self?.shutdown() }
+        menuBar.onInputDeviceSelected = { [weak self] uid in
+            self?.selectInputDevice(uid)
+        }
         menuBar.update(recording: false, elapsed: nil)
 
         Task { [transcription, root] in
@@ -187,13 +201,34 @@ final class AppController {
         }
     }
 
+    /// Persist the user's mic choice. The actual AudioDeviceID is resolved at
+    /// the next recording start, so unplugging a selected device between
+    /// recordings just falls back to the system default rather than failing.
+    private func selectInputDevice(_ uid: String?) {
+        selectedMicUID = uid
+        State.setMicDeviceUID(uid)
+        if let uid {
+            FileHandle.standardError.write(Data(
+                "input device → \(uid)\n".utf8
+            ))
+        } else {
+            FileHandle.standardError.write(Data(
+                "input device → system default\n".utf8
+            ))
+        }
+    }
+
     /// Stop any live session cleanly (finalizing files) and exit.
     func shutdown() {
+        starting = false
         stopSession()
         NSApp.terminate(nil)
     }
 
     private func toggle() {
+        // Ignore while a recording is starting up — the engine start runs on
+        // a background queue and session isn't set yet.
+        guard !starting else { return }
         if session == nil {
             startSession()
         } else {
@@ -202,20 +237,52 @@ final class AppController {
     }
 
     private func startSession() {
+        starting = true
+
+        let resolvedID = selectedMicUID.flatMap { AudioDevices.deviceID(forUID: $0) }
+        if let selectedMicUID, resolvedID == nil {
+            FileHandle.standardError.write(Data(
+                "warning: selected mic device \(selectedMicUID) not found — using system default\n".utf8
+            ))
+        }
+        // If the resolved device IS the system default, treat it as "no
+        // preference". Passing a non-nil deviceID that equals the default
+        // to MicRecorder is a no-op for the swap, but keeps the recorder on
+        // a code path where AVAudioEngine's input node binding can behave
+        // differently from the nil (system default) path — occasionally
+        // producing silence. Collapsing to nil makes the two paths
+        // literally identical.
+        let deviceID = (resolvedID == AudioDevices.defaultInputDeviceID()) ? nil : resolvedID
+
+        // Create the session folder synchronously (fast, filesystem only).
+        // The actual engine start runs in the Task below so a blocking
+        // AVAudioEngine.start() doesn't freeze the UI.
+        let newSession: RecordingSession
         do {
-            let newSession = try RecordingSession(root: root)
-            try newSession.start()
-            session = newSession
-            FileHandle.standardError.write(Data("● recording → \(newSession.dir.path)\n".utf8))
+            newSession = try RecordingSession(root: root, micDeviceID: deviceID)
         } catch {
             FileHandle.standardError.write(Data("recording start failed: \(error)\n".utf8))
             notifyUser(title: "quill — recording failed", body: "\(error)")
+            starting = false
             return
         }
 
-        menuBar.update(recording: true, elapsed: "0:00")
-        ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.tick() }
+        let dir = newSession.dir
+        Task {
+            do {
+                try await newSession.start()
+                self.session = newSession
+                self.starting = false
+                FileHandle.standardError.write(Data("● recording → \(dir.path)\n".utf8))
+                self.menuBar.update(recording: true, elapsed: "0:00")
+                self.ticker = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.tick() }
+                }
+            } catch {
+                self.starting = false
+                FileHandle.standardError.write(Data("recording start failed: \(error)\n".utf8))
+                notifyUser(title: "quill — recording failed", body: "\(error)")
+            }
         }
     }
 
