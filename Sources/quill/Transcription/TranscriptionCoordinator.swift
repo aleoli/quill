@@ -25,6 +25,13 @@ actor TranscriptionCoordinator {
         statusHandler = handler
     }
 
+    /// Forward an analysis status handler to the internal
+    /// `AnalysisCoordinator`, so the menu bar can show analysis progress
+    /// alongside transcription progress.
+    func setAnalysisStatusHandler(_ handler: @escaping @Sendable (AnalysisCoordinator.Status) -> Void) async {
+        await analysis.setStatusHandler(handler)
+    }
+
     /// Queue a finished session. With transcription disabled in config, the
     /// on_stop hook still fires — it just gets an untranscribed folder.
     func enqueue(_ sessionDir: URL) {

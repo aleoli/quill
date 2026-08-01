@@ -8,6 +8,7 @@ final class MenuBarController {
     private let statusItem: NSStatusItem
     private let stateLabel: NSMenuItem
     private let transcriptionLabel: NSMenuItem
+    private let analysisLabel: NSMenuItem
     private let toggleItem: NSMenuItem
 
     var onToggle: (() -> Void)?
@@ -28,6 +29,11 @@ final class MenuBarController {
         transcriptionLabel.isEnabled = false
         transcriptionLabel.isHidden = true
         menu.addItem(transcriptionLabel)
+
+        analysisLabel = NSMenuItem(title: "", action: nil, keyEquivalent: "")
+        analysisLabel.isEnabled = false
+        analysisLabel.isHidden = true
+        menu.addItem(analysisLabel)
 
         menu.addItem(.separator())
 
@@ -84,6 +90,14 @@ final class MenuBarController {
     func updateTranscription(_ text: String?) {
         transcriptionLabel.title = text ?? ""
         transcriptionLabel.isHidden = text == nil
+    }
+
+    /// Show analysis progress/failure as a third status line in the menu;
+    /// nil hides it. Independent of transcription — analysis runs after the
+    /// transcript is written, and a new recording can start meanwhile.
+    func updateAnalysis(_ text: String?) {
+        analysisLabel.title = text ?? ""
+        analysisLabel.isHidden = text == nil
     }
 
     // Inlined Lucide feather SVG. Keeping it in source means the executable

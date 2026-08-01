@@ -178,6 +178,11 @@ final class AppController {
                     self?.showTranscription(status)
                 }
             }
+            await transcription.setAnalysisStatusHandler { status in
+                Task { @MainActor [weak self] in
+                    self?.showAnalysis(status)
+                }
+            }
             await transcription.resumePending(root: root)
         }
     }
@@ -240,6 +245,17 @@ final class AppController {
             )
         case .failed(let name):
             menuBar.updateTranscription("transcription failed · \(name)")
+        }
+    }
+
+    private func showAnalysis(_ status: AnalysisCoordinator.Status) {
+        switch status {
+        case .idle:
+            menuBar.updateAnalysis(nil)
+        case .analyzing(let session, let module):
+            menuBar.updateAnalysis("analyzing \(session) · \(module)")
+        case .failed(let session):
+            menuBar.updateAnalysis("analysis failed · \(session)")
         }
     }
 
