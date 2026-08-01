@@ -12,7 +12,16 @@ import Foundation
 ///       },
 ///       "analysis": {
 ///         "enabled": true,
-///         "sections": ["summary","action_items","decisions","topics","qa","keywords"]
+///         "prompts_dir": "~/.config/quill/prompts",
+///         "modules": {
+///           "summary": { "prompt": "summary.md" },
+///           "action_items": { "enabled": false },
+///           "risks": {
+///             "title": "Risks & Blockers",
+///             "filename": "Risks",
+///             "prompt": "risks.md"
+///           }
+///         }
 ///       },
 ///       "llm": {
 ///         "engine": "openai",
@@ -90,13 +99,73 @@ enum Config {
         analysis()?["enabled"] as? Bool ?? true
     }
 
-    /// Which analysis sections to generate. Defaults to all six. Values must
-    /// match `AnalysisSection` raw values.
-    static func llmSections() -> [AnalysisSection] {
-        guard let raw = analysis()?["sections"] as? [String], !raw.isEmpty else {
-            return AnalysisSection.allCases
+    /// Directory where prompt Markdown files live. Default
+    /// `~/.config/quill/prompts`. Each module's `prompt` field is a
+    /// relative path inside this dir.
+    static func analysisPromptsDir() -> URL {
+        let raw = analysis()?["prompts_dir"] as? String
+            ?? "~/.config/quill/prompts"
+        return URL(
+            fileURLWithPath: (raw as NSString).expandingTildeInPath,
+            isDirectory: true
+        )
+    }
+
+    /// Resolve the configured modules. If `analysis.modules` is present,
+    /// merge built-in defaults with config overrides and add custom
+    /// modules; drop `enabled: false` entries. If absent, return all six
+    /// built-ins.
+    static func analysisModules() -> [AnalysisModule] {
+        guard let modules = analysis()?["modules"] as? [String: Any],
+              !modules.isEmpty else {
+            return AnalysisModule.Builtins.all
         }
-        return raw.compactMap { AnalysisSection(rawValue: $0) }
+        let promptsDir = analysisPromptsDir()
+        var result: [AnalysisModule] = []
+        for (id, cfg) in modules {
+            guard let dict = cfg as? [String: Any] else { continue }
+            if dict["enabled"] as? Bool == false { continue }
+            result.append(resolveModule(id: id, dict: dict, promptsDir: promptsDir))
+        }
+        // Preserve built-in order for known IDs; custom modules appended
+        // in config order after.
+        let builtinOrder = AnalysisModule.Builtins.all.map { $0.id }
+        result.sort { a, b in
+            let ai = builtinOrder.firstIndex(of: a.id) ?? Int.max
+            let bi = builtinOrder.firstIndex(of: b.id) ?? Int.max
+            return ai == bi ? a.id < b.id : ai < bi
+        }
+        return result
+    }
+
+    /// Merge a built-in (if the ID matches one) with config overrides, or
+    /// build a custom module from scratch. `prompt` is loaded from disk if
+    /// set; otherwise the built-in prompt is used.
+    private static func resolveModule(
+        id: String, dict: [String: Any], promptsDir: URL
+    ) -> AnalysisModule {
+        let builtin = AnalysisModule.Builtins.find(id)
+        let title = dict["title"] as? String ?? builtin?.title ?? id.replacingOccurrences(of: "_", with: " ").capitalized
+        let filename = dict["filename"] as? String ?? builtin?.filename ?? id.replacingOccurrences(of: " ", with: "_").capitalized
+        let systemPrompt = dict["system_prompt"] as? String ?? builtin?.systemPrompt ?? AnalysisModule.Builtins.systemPrompt
+
+        var prompt = builtin?.prompt ?? ""
+        if let promptFile = dict["prompt"] as? String, !promptFile.isEmpty {
+            do {
+                prompt = try Prompts.loadPromptFile(promptFile, promptsDir: promptsDir)
+            } catch {
+                FileHandle.standardError.write(Data(
+                    "warning: \(error) — using built-in prompt for \"\(id)\"\n".utf8
+                ))
+            }
+        }
+        return AnalysisModule(
+            id: id,
+            title: title,
+            filename: filename,
+            prompt: prompt,
+            systemPrompt: systemPrompt
+        )
     }
 
     private static func analysis() -> [String: Any]? {

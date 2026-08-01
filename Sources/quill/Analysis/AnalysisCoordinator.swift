@@ -35,16 +35,16 @@ actor AnalysisCoordinator {
     /// Analyze a single session synchronously (used by the `quill analyze`
     /// CLI subcommand). Bypasses the queue and the `analysis.enabled` check
     /// — the user asked for it explicitly.
-    func analyzeSession(_ dir: URL, sections: [AnalysisSection]) async throws {
+    func analyzeSession(_ dir: URL, modules: [AnalysisModule]) async throws {
         let engine = try await preparedEngine()
         let analyzer = Analyzer(engine: engine)
-        for section in sections {
-            publish(.analyzing(session: dir.lastPathComponent, section: section.rawValue))
-            log(dir, "analyzing \(section.rawValue)")
+        for module in modules {
+            publish(.analyzing(session: dir.lastPathComponent, section: module.id))
+            log(dir, "analyzing \(module.id)")
         }
-        let results = try await analyzer.analyze(sessionDir: dir, sections: sections)
-        try analyzer.writeAnalysisFolder(sessionDir: dir, results: results)
-        log(dir, "done — \(results.count) sections")
+        let results = try await analyzer.analyze(sessionDir: dir, modules: modules)
+        try analyzer.writeAnalysisFolder(sessionDir: dir, modules: modules, results: results)
+        log(dir, "done — \(results.count) modules")
         await engine.release()
         self.engine = nil
     }
@@ -81,15 +81,15 @@ actor AnalysisCoordinator {
 
     private func analyze(_ dir: URL) async throws {
         let engine = try await preparedEngine()
-        let sections = Config.llmSections()
+        let modules = Config.analysisModules()
         let analyzer = Analyzer(engine: engine)
-        for section in sections {
-            publish(.analyzing(session: dir.lastPathComponent, section: section.rawValue))
-            log(dir, "analyzing \(section.rawValue)")
+        for module in modules {
+            publish(.analyzing(session: dir.lastPathComponent, section: module.id))
+            log(dir, "analyzing \(module.id)")
         }
-        let results = try await analyzer.analyze(sessionDir: dir, sections: sections)
-        try analyzer.writeAnalysisFolder(sessionDir: dir, results: results)
-        log(dir, "done — \(results.count) sections")
+        let results = try await analyzer.analyze(sessionDir: dir, modules: modules)
+        try analyzer.writeAnalysisFolder(sessionDir: dir, modules: modules, results: results)
+        log(dir, "done — \(results.count) modules")
     }
 
     private func preparedEngine() async throws -> LLMEngine {

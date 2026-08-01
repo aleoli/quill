@@ -47,8 +47,6 @@ actor OpenAIEngine: LLMEngine {
             port: parsed.port,
             scheme: parsed.scheme,
             basePath: parsed.path,
-            // Local models (Ollama with qwen3.6:35b) can be slow on long
-            // transcripts — generous timeout like the notetaker's 600s.
             timeoutInterval: 600.0
         )
         client = OpenAI(configuration: config)

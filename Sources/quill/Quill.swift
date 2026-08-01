@@ -76,8 +76,8 @@ struct Doctor: ParsableCommand {
 
 /// Run AI analysis (summary, action items, etc.) on a session's transcript.
 /// Writes an Obsidian-style folder of Markdown notes inside the session
-/// directory. By default uses the sections and LLM endpoint from config;
-/// `--only` overrides the sections for this run.
+/// directory. By default uses the modules from config; `--only` overrides
+/// with a comma-separated list of module IDs.
 struct Analyze: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "analyze",
@@ -87,7 +87,7 @@ struct Analyze: ParsableCommand {
     @Argument(help: "Session directory containing transcript.json.")
     var dir: String
 
-    @Option(name: .long, help: "Comma-separated sections to generate (overrides config).")
+    @Option(name: .long, help: "Comma-separated module IDs to run (overrides config).")
     var only: String?
 
     func run() throws {
@@ -104,11 +104,22 @@ struct Analyze: ParsableCommand {
             throw ExitCode(1)
         }
 
-        let sections: [AnalysisSection]
-        if let only, let parsed = AnalysisSection.parse(only) {
-            sections = parsed
+        let modules: [AnalysisModule]
+        if let only {
+            let ids = only.split(separator: ",").map {
+                $0.trimmingCharacters(in: .whitespaces)
+            }
+            let configured = Config.analysisModules()
+            modules = ids.compactMap { id in configured.first { $0.id == id } }
+            if modules.count != ids.count {
+                let missing = ids.filter { id in !configured.contains { $0.id == id } }
+                FileHandle.standardError.write(Data(
+                    "unknown module(s): \(missing.joined(separator: ", "))\n".utf8
+                ))
+                throw ExitCode(1)
+            }
         } else {
-            sections = Config.llmSections()
+            modules = Config.analysisModules()
         }
 
         let coordinator = AnalysisCoordinator()
@@ -116,7 +127,7 @@ struct Analyze: ParsableCommand {
         let errorBox = ErrorBox()
         Task {
             do {
-                try await coordinator.analyzeSession(sessionDir, sections: sections)
+                try await coordinator.analyzeSession(sessionDir, modules: modules)
             } catch {
                 errorBox.error = error
             }

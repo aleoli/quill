@@ -44,21 +44,19 @@ struct Analyzer {
 
     // MARK: - Analysis
 
-    /// Run the requested sections on a session's transcript, returning one
-    /// cleaned string per section.
+    /// Run the requested modules on a session's transcript, returning one
+    /// cleaned string per module (keyed by module ID).
     func analyze(
         sessionDir: URL,
-        sections: [AnalysisSection]
-    ) async throws -> [AnalysisSection: String] {
+        modules: [AnalysisModule]
+    ) async throws -> [String: String] {
         let text = try extractText(from: sessionDir)
         try await engine.prepare()
-        var results: [AnalysisSection: String] = [:]
-        for section in sections {
-            let prompt = Prompts.prompts[section]!.replacingOccurrences(
-                of: "{text}", with: text
-            )
-            let result = try await engine.complete(prompt, systemPrompt: Prompts.system)
-            results[section] = result
+        var results: [String: String] = [:]
+        for module in modules {
+            let prompt = module.prompt.replacingOccurrences(of: "{text}", with: text)
+            let result = try await engine.complete(prompt, systemPrompt: module.systemPrompt)
+            results[module.id] = result
         }
         return results
     }
@@ -74,7 +72,8 @@ struct Analyzer {
     ///       AI_Summary.md, Action_Items.md, ...
     func writeAnalysisFolder(
         sessionDir: URL,
-        results: [AnalysisSection: String]
+        modules: [AnalysisModule],
+        results: [String: String]
     ) throws {
         let name = sessionDir.lastPathComponent
         let folder = sessionDir.appendingPathComponent(name, isDirectory: true)
@@ -83,18 +82,19 @@ struct Analyzer {
         let title = name.replacingOccurrences(of: "_", with: " ")
             .replacingOccurrences(of: "-", with: " ").capitalized
 
-        // One Markdown file per section.
-        var sectionFiles: [AnalysisSection: String] = [:]
-        for (section, content) in results {
-            let filename = "\(Prompts.filenames[section]!).md"
+        // One Markdown file per module.
+        var moduleFiles: [(module: AnalysisModule, filename: String)] = []
+        for module in modules {
+            guard let content = results[module.id] else { continue }
+            let filename = "\(module.filename).md"
             let path = folder.appendingPathComponent(filename)
             try writeMarkdownFile(
                 at: path,
-                title: "\(title) - \(Prompts.titles[section]!)",
+                title: "\(title) - \(module.title)",
                 body: content,
-                tags: ["ai-analysis", section.rawValue]
+                tags: ["ai-analysis", module.id]
             )
-            sectionFiles[section] = filename
+            moduleFiles.append((module, filename))
         }
 
         // Transcript rendered with timestamps + speakers.
@@ -108,7 +108,7 @@ struct Analyzer {
             at: overviewPath,
             title: title,
             transcriptFile: transcriptFile,
-            sectionFiles: sectionFiles
+            moduleFiles: moduleFiles
         )
     }
 
@@ -192,7 +192,8 @@ struct Analyzer {
 
     private func writeOverview(
         at path: URL, title: String,
-        transcriptFile: String, sectionFiles: [AnalysisSection: String]
+        transcriptFile: String,
+        moduleFiles: [(module: AnalysisModule, filename: String)]
     ) throws {
         let now = ISO8601DateFormatter().string(from: Date())
         var lines = [
@@ -204,10 +205,9 @@ struct Analyzer {
             "",
             "## Analysis Sections", "",
         ]
-        for section in sectionFiles.keys.sorted(by: { $0.rawValue < $1.rawValue }) {
-            let file = sectionFiles[section]!
-            let link = file.dropLast(3) // strip .md
-            lines.append("- [[\(link)|\(Prompts.titles[section]!)]]")
+        for entry in moduleFiles {
+            let link = entry.filename.dropLast(3) // strip .md
+            lines.append("- [[\(link)|\(entry.module.title)]]")
         }
         lines.append("")
         try Data(lines.joined(separator: "\n").utf8).write(to: path, options: .atomic)

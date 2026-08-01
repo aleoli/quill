@@ -110,7 +110,16 @@ Add an `analysis` and `llm` block to `~/.config/quill/config.json`:
 {
   "analysis": {
     "enabled": true,
-    "sections": ["summary", "action_items", "decisions", "topics", "qa", "keywords"]
+    "prompts_dir": "~/.config/quill/prompts",
+    "modules": {
+      "summary": { "prompt": "summary.md" },
+      "action_items": { "enabled": false },
+      "risks": {
+        "title": "Risks & Blockers",
+        "filename": "Risks",
+        "prompt": "risks.md"
+      }
+    }
   },
   "llm": {
     "engine": "openai",
@@ -125,8 +134,20 @@ Add an `analysis` and `llm` block to `~/.config/quill/config.json`:
 
 - `analysis.enabled` — set `false` to skip automatic analysis (default on).
   Recording and transcription still work.
-- `analysis.sections` — which sections to generate. Defaults to all six:
-  `summary`, `action_items`, `decisions`, `topics`, `qa`, `keywords`.
+- `analysis.prompts_dir` — directory where prompt Markdown files live
+  (default `~/.config/quill/prompts`). Each module's `prompt` field is a
+  relative path inside this dir.
+- `analysis.modules` — a dict keyed by module ID. If absent, all six
+  built-ins run (`summary`, `action_items`, `decisions`, `topics`, `qa`,
+  `keywords`). Each entry can override:
+  - `prompt` — relative path to a Markdown file (see below). Overrides the
+    built-in prompt.
+  - `title` — human-readable title for the Obsidian overview link.
+  - `filename` — output Markdown filename (without extension).
+  - `system_prompt` — per-module system prompt (defaults to the shared one).
+  - `enabled` — set `false` to disable a built-in.
+  - A key that doesn't match a built-in defines a **custom module** —
+    `prompt` is required, `title`/`filename` default from the ID.
 - `llm.engine` — `openai` (the only engine today; works with any
   OpenAI-compatible endpoint). Unknown values warn and fall back to openai.
 - `llm.base_url` — the OpenAI-compatible API root. Default is a local Ollama
@@ -138,6 +159,34 @@ Add an `analysis` and `llm` block to `~/.config/quill/config.json`:
 - `llm.temperature` — sampling temperature (default 0.3).
 - `llm.max_tokens` — max completion tokens (default 4096). Bump for long
   transcripts.
+
+### Prompt files
+
+A prompt file is a plain Markdown file. YAML front matter (optional) is
+stripped before sending to the LLM; the body is the prompt. `{text}` is
+replaced with the formatted transcript (speaker labels `**me**` for the
+microphone track, `**them**` for system audio):
+
+`~/.config/quill/prompts/risks.md`:
+
+```markdown
+---
+title: Risks & Blockers
+---
+
+Extract risks, blockers, and open issues from this meeting transcript.
+The user is labeled **me**, the other party is **them**.
+Format as a Markdown list. Use the same language as the transcript.
+
+---
+{text}
+---
+
+RISKS:
+```
+
+The six built-in prompts ship embedded in quill and work with zero file
+setup — you only need prompt files to override or add modules.
 
 ### Manual analysis
 
@@ -163,7 +212,15 @@ Optional, at `~/.config/quill/config.json`:
   },
   "analysis": {
     "enabled": true,
-    "sections": ["summary", "action_items", "decisions", "topics", "qa", "keywords"]
+    "prompts_dir": "~/.config/quill/prompts",
+    "modules": {
+      "summary": {},
+      "action_items": {},
+      "decisions": {},
+      "topics": {},
+      "qa": {},
+      "keywords": {}
+    }
   },
   "llm": {
     "engine": "openai",
