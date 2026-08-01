@@ -38,11 +38,15 @@ actor AnalysisCoordinator {
     func analyzeSession(_ dir: URL, modules: [AnalysisModule]) async throws {
         let engine = try await preparedEngine()
         let analyzer = Analyzer(engine: engine)
-        for module in modules {
-            publish(.analyzing(session: dir.lastPathComponent, section: module.id))
-            log(dir, "analyzing \(module.id)")
-        }
-        let results = try await analyzer.analyze(sessionDir: dir, modules: modules)
+        let results = try await analyzer.analyze(
+            sessionDir: dir,
+            modules: modules,
+            onModule: { [weak self] module in
+                guard let self else { return }
+                await self.publish(.analyzing(session: dir.lastPathComponent, section: module.id))
+                await self.log(dir, "analyzing \(module.id)")
+            }
+        )
         try analyzer.writeAnalysisFolder(sessionDir: dir, modules: modules, results: results)
         log(dir, "done — \(results.count) modules")
         await engine.release()
@@ -83,11 +87,15 @@ actor AnalysisCoordinator {
         let engine = try await preparedEngine()
         let modules = Config.analysisModules()
         let analyzer = Analyzer(engine: engine)
-        for module in modules {
-            publish(.analyzing(session: dir.lastPathComponent, section: module.id))
-            log(dir, "analyzing \(module.id)")
-        }
-        let results = try await analyzer.analyze(sessionDir: dir, modules: modules)
+        let results = try await analyzer.analyze(
+            sessionDir: dir,
+            modules: modules,
+            onModule: { [weak self] module in
+                guard let self else { return }
+                await self.publish(.analyzing(session: dir.lastPathComponent, section: module.id))
+                await self.log(dir, "analyzing \(module.id)")
+            }
+        )
         try analyzer.writeAnalysisFolder(sessionDir: dir, modules: modules, results: results)
         log(dir, "done — \(results.count) modules")
     }

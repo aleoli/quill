@@ -45,15 +45,20 @@ struct Analyzer {
     // MARK: - Analysis
 
     /// Run the requested modules on a session's transcript, returning one
-    /// cleaned string per module (keyed by module ID).
+    /// cleaned string per module (keyed by module ID). `onModule`, if set,
+    /// is awaited immediately before each module is sent to the LLM — used by
+    /// the coordinator to publish per-module progress as each module actually
+    /// starts, rather than all up front.
     func analyze(
         sessionDir: URL,
-        modules: [AnalysisModule]
+        modules: [AnalysisModule],
+        onModule: (@Sendable (AnalysisModule) async -> Void)? = nil
     ) async throws -> [String: String] {
         let text = try extractText(from: sessionDir)
         try await engine.prepare()
         var results: [String: String] = [:]
         for module in modules {
+            if let onModule { await onModule(module) }
             let prompt = module.prompt.replacingOccurrences(of: "{text}", with: text)
             let result = try await engine.complete(prompt, systemPrompt: module.systemPrompt)
             results[module.id] = result
