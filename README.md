@@ -58,6 +58,13 @@ Core ML port — roughly 20 seconds per hour of audio on Apple Silicon. Models
 whether they're already cached so you're never downloading after an important
 meeting.
 
+For multilingual audio, switch to the **Whisper** engine
+([WhisperKit](https://github.com/argmaxinc/argmax-oss-swift) / Core ML, running
+on the Apple Neural Engine). Set `transcription.engine` to `"whisper"` in
+config; the model defaults to `large-v3-v20240930_turbo` (~626 MB) and is
+configurable. Whisper auto-detects the language per file, or you can force one
+with `transcription.language`.
+
 Each track is transcribed separately, shifted by its start offset so both
 share one clock, and merged by timestamp. Jobs run in a serial queue — you can
 start a new recording while the last one transcribes. Unfinished jobs resume
@@ -65,8 +72,7 @@ on next launch (the filesystem is the queue: a session with `meta.json` but no
 `transcript.json` is pending). Failures append to the session's
 `transcribe.log` and never block later jobs.
 
-The engine sits behind a small protocol; a Whisper engine (WhisperKit
-large-v3-turbo) is planned as the fallback / re-transcription option.
+The engine sits behind a small protocol; `parakeet` and `whisper` ship today.
 
 ## Config
 
@@ -75,7 +81,12 @@ Optional, at `~/.config/quill/config.json`:
 ```json
 {
   "recordings_dir": "~/Recordings",
-  "transcription": { "enabled": true, "engine": "parakeet" },
+  "transcription": {
+    "enabled": true,
+    "engine": "parakeet",
+    "model": "large-v3-v20240930_turbo",
+    "language": "it"
+  },
   "on_stop": "my-hook"
 }
 ```
@@ -83,6 +94,15 @@ Optional, at `~/.config/quill/config.json`:
 - `recordings_dir` — where sessions land. Resolution order: `--out` flag >
   config > `~/Recordings`.
 - `transcription.enabled` — set `false` to just record.
+- `transcription.engine` — `parakeet` (default, English-only, fastest) or
+  `whisper` (multilingual via WhisperKit / Core ML). Unknown values warn and
+  fall back to parakeet.
+- `transcription.model` — WhisperKit model name, only used when
+  `engine == "whisper"`. Defaults to `large-v3-v20240930_turbo`. Any model in
+  the `argmaxinc/whisperkit-coreml*` HuggingFace family works.
+- `transcription.language` — optional ISO 639-1 code (e.g. `"it"`, `"en"`) to
+  force for the whisper engine. Omit for per-file auto-detection. Ignored by
+  parakeet (English-only).
 - `mic_voice_processing` — Apple's echo cancellation on the mic (default off).
   Set `true` when recording meetings through the speakers, so playback doesn't
   bleed into the mic track and get transcribed twice as "me". The trade: while
@@ -112,6 +132,7 @@ quill install --uninstall
 - **AVAudioEngine** — mic capture
 - **AVAudioFile** — streaming AAC encode into CAF
 - **FluidAudio / Parakeet** — on-device Core ML transcription
+- **WhisperKit / argmax-oss-swift** — on-device Core ML transcription (whisper engine)
 - **NSStatusItem** — the whole UI
 
 ## Gotchas
@@ -121,7 +142,6 @@ quill install --uninstall
   per-process picker if it bothers you).
 - If recordings come out silent, check System Settings → Privacy & Security →
   Screen & System Audio Recording.
-- Parakeet v2 is English-only. Other languages will come with the Whisper
-  engine.
+- Parakeet v2 is English-only. Use the `whisper` engine for other languages.
 - The binary embeds its Info.plist (`__TEXT,__info_plist`) so TCC can
   attribute permissions to quill itself when running as a LaunchAgent.

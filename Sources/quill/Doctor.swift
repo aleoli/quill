@@ -77,7 +77,9 @@ enum DoctorReport {
     }
 
     /// Never discover a missing model after an important meeting: report
-    /// whether the parakeet models are already in FluidAudio's cache.
+    /// whether the configured engine's models are already cached. Parakeet
+    /// uses FluidAudio's cache; Whisper uses WhisperKit's HuggingFace cache
+    /// under ~/Documents/huggingface.
     static func checkTranscription() -> Check {
         guard Config.transcriptionEnabled() else {
             return Check(
@@ -86,6 +88,15 @@ enum DoctorReport {
                 remediation: nil
             )
         }
+        switch Config.transcriptionEngine() {
+        case "whisper":
+            return checkWhisperModels()
+        default:
+            return checkParakeetModels()
+        }
+    }
+
+    private static func checkParakeetModels() -> Check {
         let cache = AsrModels.defaultCacheDirectory(for: .v2)
         if AsrModels.modelsExist(at: cache, version: .v2) {
             return Check(name: "transcription", status: .ok, remediation: nil)
@@ -93,6 +104,26 @@ enum DoctorReport {
         return Check(
             name: "transcription",
             status: .warn("parakeet models not downloaded (~600 MB)"),
+            remediation: "downloads automatically on first transcription — record a short test session while online"
+        )
+    }
+
+    /// WhisperKit downloads Core ML models from HuggingFace into
+    /// ~/Documents/huggingface/models--argmaxinc--whisperkit-coreml. We can't
+    /// cheaply tell whether the *specific* configured model is present (the
+    /// cache is keyed by commit hash), so we report on the repo folder as a
+    /// best-effort "has anything been downloaded yet" signal.
+    private static func checkWhisperModels() -> Check {
+        let model = Config.whisperModel()
+        let repoDir = FileManager.default
+            .homeDirectoryForCurrentUser
+            .appendingPathComponent("Documents/huggingface/models--argmaxinc--whisperkit-coreml")
+        if FileManager.default.fileExists(atPath: repoDir.path) {
+            return Check(name: "transcription", status: .ok, remediation: nil)
+        }
+        return Check(
+            name: "transcription",
+            status: .warn("whisper models not downloaded (model: \(model), ~600 MB+)"),
             remediation: "downloads automatically on first transcription — record a short test session while online"
         )
     }

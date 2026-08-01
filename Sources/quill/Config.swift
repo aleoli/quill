@@ -4,7 +4,12 @@ import Foundation
 ///
 ///     {
 ///       "recordings_dir": "~/Recordings",
-///       "transcription": { "enabled": true, "engine": "parakeet" },
+///       "transcription": {
+///         "enabled": true,
+///         "engine": "parakeet",          // or "whisper"
+///         "model": "large-v3-v20240930_turbo",  // whisper only
+///         "language": "it"                // whisper only; omit for auto-detect
+///       },
 ///       "mic_voice_processing": true,
 ///       "on_stop": "my-hook"
 ///     }
@@ -38,10 +43,27 @@ enum Config {
         transcription()?["enabled"] as? Bool ?? true
     }
 
-    /// Configured engine name. Only "parakeet" ships today; the coordinator
-    /// warns and falls back for anything else.
+    /// Configured engine name. "parakeet" ships as the default; "whisper"
+    /// (WhisperKit / Core ML) is the multilingual fallback. Anything else
+    /// warns and falls back to parakeet.
     static func transcriptionEngine() -> String {
         transcription()?["engine"] as? String ?? "parakeet"
+    }
+
+    /// WhisperKit model name (only used when engine == "whisper"). Defaults
+    /// to large-v3-turbo — the best speed/accuracy balance on macOS per
+    /// Argmax's recommendation. Any HuggingFace model in the
+    /// `argmaxinc/whisperkit-coreml*` family works.
+    static func whisperModel() -> String {
+        transcription()?["model"] as? String ?? "large-v3-v20240930_turbo"
+    }
+
+    /// Optional ISO 639-1 language code (e.g. "it", "en", "fr") to force for
+    /// the whisper engine. nil → Whisper auto-detects per file. Ignored by
+    /// parakeet (English-only).
+    static func whisperLanguage() -> String? {
+        guard let lang = transcription()?["language"] as? String, !lang.isEmpty else { return nil }
+        return lang
     }
 
     private static func transcription() -> [String: Any]? {
