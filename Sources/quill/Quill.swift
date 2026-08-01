@@ -7,7 +7,7 @@ struct Quill: ParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "quill",
         abstract: "Local meeting recorder + transcriber. Records mic and system audio as two tracks, then transcribes on-device.",
-        subcommands: [Run.self, Doctor.self, Install.self],
+        subcommands: [Run.self, Doctor.self, Analyze.self, Install.self],
         defaultSubcommand: Run.self
     )
 }
@@ -72,6 +72,76 @@ struct Doctor: ParsableCommand {
             throw ExitCode(1)
         }
     }
+}
+
+/// Run AI analysis (summary, action items, etc.) on a session's transcript.
+/// Writes an Obsidian-style folder of Markdown notes inside the session
+/// directory. By default uses the sections and LLM endpoint from config;
+/// `--only` overrides the sections for this run.
+struct Analyze: ParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "analyze",
+        abstract: "Run AI analysis on a session's transcript."
+    )
+
+    @Argument(help: "Session directory containing transcript.json.")
+    var dir: String
+
+    @Option(name: .long, help: "Comma-separated sections to generate (overrides config).")
+    var only: String?
+
+    func run() throws {
+        let sessionDir = URL(
+            fileURLWithPath: (dir as NSString).expandingTildeInPath,
+            isDirectory: true
+        )
+        guard FileManager.default.fileExists(
+            atPath: sessionDir.appendingPathComponent("transcript.json").path
+        ) else {
+            FileHandle.standardError.write(Data(
+                "no transcript.json in \(sessionDir.path)\n".utf8
+            ))
+            throw ExitCode(1)
+        }
+
+        let sections: [AnalysisSection]
+        if let only, let parsed = AnalysisSection.parse(only) {
+            sections = parsed
+        } else {
+            sections = Config.llmSections()
+        }
+
+        let coordinator = AnalysisCoordinator()
+        let sem = DispatchSemaphore(value: 0)
+        let errorBox = ErrorBox()
+        Task {
+            do {
+                try await coordinator.analyzeSession(sessionDir, sections: sections)
+            } catch {
+                errorBox.error = error
+            }
+            sem.signal()
+        }
+        // Pump the main run loop while the async work runs on the
+        // cooperative thread pool — Analyze is a CLI, not a daemon, so we
+        // need to keep the process alive until the Task completes.
+        while sem.wait(timeout: .now()) == .timedOut {
+            RunLoop.current.run(until: Date(timeIntervalSinceNow: 0.1))
+        }
+        if let error = errorBox.error {
+            FileHandle.standardError.write(Data(
+                "analysis failed: \(error)\n".utf8
+            ))
+            throw ExitCode(1)
+        }
+    }
+}
+
+/// Thread-safe box for passing an error out of a `Task` back to the
+/// synchronous `run()` caller. The error is written once before the
+/// semaphore signals and read once after, so the race is benign.
+final class ErrorBox: @unchecked Sendable {
+    var error: Error?
 }
 
 /// Owns the menu bar, the current recording session, and the elapsed-time

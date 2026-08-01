@@ -19,6 +19,7 @@ actor TranscriptionCoordinator {
     private var engine: TranscriptionEngine?
     private var lastFailure: String?
     private var statusHandler: (@Sendable (Status) -> Void)?
+    private let analysis = AnalysisCoordinator()
 
     func setStatusHandler(_ handler: @escaping @Sendable (Status) -> Void) {
         statusHandler = handler
@@ -79,6 +80,10 @@ actor TranscriptionCoordinator {
                 try await transcribe(dir)
                 notifyUser(title: "quill — transcript ready", body: dir.lastPathComponent)
                 runHook(for: dir)
+                // After the transcript is written (and the on_stop hook has
+                // fired), queue the session for AI analysis. No-op if
+                // analysis is disabled in config.
+                await analysis.enqueue(dir)
             } catch {
                 log(dir, "transcription failed: \(error)")
                 lastFailure = dir.lastPathComponent

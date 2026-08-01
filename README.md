@@ -74,6 +74,80 @@ on next launch (the filesystem is the queue: a session with `meta.json` but no
 
 The engine sits behind a small protocol; `parakeet` and `whisper` ship today.
 
+## AI Analysis
+
+After each transcript is written, quill can run an LLM to extract a
+summary, action items, decisions, topics, Q&A, and keywords — then write
+an Obsidian-style folder of Markdown notes inside the session directory.
+Analysis is optional and works with any OpenAI-compatible endpoint: a local
+[Ollama](https://ollama.com) server, OpenRouter, or OpenAI itself.
+
+### Output layout
+
+For a session `~/Recordings/2026.07.31-1400/`, analysis writes:
+
+```text
+2026.07.31-1400/
+  2026.07.31-1400/                    # overview with Obsidian wiki-links
+  2026.07.31-1400_Transcript.md       # transcript with timestamps
+  AI_Summary.md
+  Action_Items.md
+  Key_Decisions.md
+  Topics_Outline.md
+  Questions_and_Answers.md
+  Keywords.md
+  analysis.log                        # per-session progress/errors
+```
+
+The overview note uses `[[...]]` wiki-links so Obsidian renders the whole
+session as a navigable graph.
+
+### Analysis config
+
+Add an `analysis` and `llm` block to `~/.config/quill/config.json`:
+
+```json
+{
+  "analysis": {
+    "enabled": true,
+    "sections": ["summary", "action_items", "decisions", "topics", "qa", "keywords"]
+  },
+  "llm": {
+    "engine": "openai",
+    "base_url": "http://localhost:11434/v1",
+    "api_key": "",
+    "model": "qwen3.6:35b",
+    "temperature": 0.2,
+    "max_tokens": 64000
+  }
+}
+```
+
+- `analysis.enabled` — set `false` to skip automatic analysis (default on).
+  Recording and transcription still work.
+- `analysis.sections` — which sections to generate. Defaults to all six:
+  `summary`, `action_items`, `decisions`, `topics`, `qa`, `keywords`.
+- `llm.engine` — `openai` (the only engine today; works with any
+  OpenAI-compatible endpoint). Unknown values warn and fall back to openai.
+- `llm.base_url` — the OpenAI-compatible API root. Default is a local Ollama
+  server (`http://localhost:11434/v1`). For OpenAI, use
+  `https://api.openai.com/v1`.
+- `llm.api_key` — API key. Leave empty for local Ollama (no auth needed).
+- `llm.model` — any model name the endpoint accepts: Ollama tags
+  (`qwen3.6:35b`), OpenAI IDs (`gpt-4o`), etc.
+- `llm.temperature` — sampling temperature (default 0.3).
+- `llm.max_tokens` — max completion tokens (default 4096). Bump for long
+  transcripts.
+
+### Manual analysis
+
+```sh
+quill analyze <session-dir>           # analyze one session (uses config)
+quill analyze <session-dir> --only summary,action_items
+```
+
+`quill doctor` checks that the LLM endpoint is reachable.
+
 ## Config
 
 Optional, at `~/.config/quill/config.json`:
@@ -86,6 +160,18 @@ Optional, at `~/.config/quill/config.json`:
     "engine": "parakeet",
     "model": "large-v3-v20240930_turbo",
     "language": "it"
+  },
+  "analysis": {
+    "enabled": true,
+    "sections": ["summary", "action_items", "decisions", "topics", "qa", "keywords"]
+  },
+  "llm": {
+    "engine": "openai",
+    "base_url": "http://localhost:11434/v1",
+    "api_key": "",
+    "model": "qwen3.6:35b",
+    "temperature": 0.2,
+    "max_tokens": 64000
   },
   "on_stop": "my-hook"
 }
@@ -119,7 +205,8 @@ Optional, at `~/.config/quill/config.json`:
 ```sh
 quill                        # run the menu-bar daemon (^C to quit)
 quill run --out <dir>        # custom recordings root (default ~/Recordings)
-quill doctor                 # check permissions, recordings folder, models
+quill doctor                 # check permissions, recordings folder, models, LLM
+quill analyze <session-dir>  # run AI analysis on one session's transcript
 quill install --launch-at-login
 quill install --uninstall
 ```
@@ -133,6 +220,7 @@ quill install --uninstall
 - **AVAudioFile** — streaming AAC encode into CAF
 - **FluidAudio / Parakeet** — on-device Core ML transcription
 - **WhisperKit / argmax-oss-swift** — on-device Core ML transcription (whisper engine)
+- **macpaw/OpenAI** — OpenAI-compatible LLM client for AI analysis (Ollama, OpenAI, OpenRouter)
 - **NSStatusItem** — the whole UI
 
 ## Gotchas
