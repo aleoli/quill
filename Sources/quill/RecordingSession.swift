@@ -19,6 +19,16 @@ final class RecordingSession: @unchecked Sendable {
     /// Selected mic device id (current process lifetime). nil = system default.
     private let micDeviceID: AudioDeviceID?
 
+    /// Peak mic level over the last second, 0…1. Drives the menu-bar meter so
+    /// a mic that stopped delivering audio is visible during the meeting.
+    var micLevel: Float { mic.level }
+
+    /// Observe the mic track's health (stalls, silence, unrecoverable failure).
+    /// Set before `start()`. The handler is invoked off the main actor.
+    func setMicStatusHandler(_ handler: @escaping @Sendable (MicRecorder.Health) -> Void) {
+        mic.onStatus = handler
+    }
+
     private static let folderFormat: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy.MM.dd-HHmm"

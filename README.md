@@ -28,6 +28,11 @@ transcription speed.
    for microphone and System Audio Recording permissions. While recording, the
    icon turns red with a running elapsed counter, and macOS shows the purple
    recording indicator.
+   The menu's **Input device** submenu picks which microphone to record;
+   "System default" follows whatever macOS is using. While recording, the menu
+   shows a live peak meter for the mic — and a `⚠︎` if the track stops
+   receiving audio, so a muted or disconnected mic surfaces during the meeting
+   instead of in the transcript.
 3. **Click → Stop recording** when the meeting ends. Transcription starts
    automatically (the menu shows progress); a notification fires when the
    transcript is ready.
@@ -36,7 +41,7 @@ Each session lands in `~/Recordings/<yyyy.MM.dd-HHmm>/`:
 
 | File | Contents |
 |---|---|
-| `mic.caf` | your side (default input device, AAC) |
+| `mic.caf` | your side (selected input device, AAC) |
 | `system.caf` | everything the Mac played — the other side of the call (AAC) |
 | `meta.json` | start/end timestamps, duration, per-track start offsets |
 | `transcript.json` | canonical transcript — engine provenance + timed, speaker-tagged segments |
@@ -246,12 +251,14 @@ Optional, at `~/.config/quill/config.json`:
 - `transcription.language` — optional ISO 639-1 code (e.g. `"it"`, `"en"`) to
   force for the whisper engine. Omit for per-file auto-detection. Ignored by
   parakeet (English-only).
-- `mic_voice_processing` — Apple's echo cancellation on the mic (default off).
-  Set `true` when recording meetings through the speakers, so playback doesn't
-  bleed into the mic track and get transcribed twice as "me". The trade: while
-  the voice unit is live, macOS ducks other playback slightly (`.min` ducking
-  is configured, but it can't be zeroed). On headphones there's no echo to
-  cancel, so raw capture is the better default.
+- `mic_voice_processing` — **no longer supported.** It enabled Apple's echo
+  cancellation, which only exists on the AVAudioEngine capture path. The mic is
+  now captured through a Core Audio IOProc, because AVAudioEngine cannot open an
+  input device that isn't backed by the default output — a recording taken with
+  Bluetooth headphones and a separate microphone simply fails to start
+  (`.issues/rca-002`). Setting the key logs a warning and records raw. If
+  speaker playback bleeds into the mic track, the clean far-end audio is already
+  in `system.caf`, so the cure belongs in transcript-level echo suppression.
 - `on_stop` — shell command spawned with the session directory as its
   argument, **after the transcript is written** (or right after recording if
   transcription is disabled). Wire it to whatever comes next: summarization,

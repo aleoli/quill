@@ -134,8 +134,10 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private func rebuildDeviceMenu() {
         inputDeviceMenu.removeAllItems()
 
+        let defaultName = AudioDevices.defaultInputDeviceID()
+            .flatMap(AudioDevices.deviceName(forID:))
         let defaultItem = NSMenuItem(
-            title: "System default",
+            title: defaultName.map { "System default (\($0))" } ?? "System default",
             action: #selector(deviceSelected(_:)),
             keyEquivalent: ""
         )
@@ -171,13 +173,38 @@ final class MenuBarController: NSObject, NSMenuDelegate {
 
     /// Reflect recording state in the icon tint and menu item titles. The
     /// menu bar shows only the feather (red while recording); the elapsed
-    /// counter lives in the menu's state label. Call once a second while
-    /// recording.
-    func update(recording: Bool, elapsed: String?) {
+    /// counter and the mic level live in the menu's state label. Call once a
+    /// second while recording.
+    ///
+    /// `micLevel` is the mic peak of the last second (0…1) and `micAlert` is a
+    /// short problem description (nil when the track is healthy) — both exist
+    /// so a silent mic is obvious mid-meeting rather than at transcript time.
+    func update(recording: Bool, elapsed: String?, micLevel: Float = 0, micAlert: String? = nil) {
         self.recording = recording
-        stateLabel.title = recording ? "● recording · \(elapsed ?? "0:00")" : "idle"
+        if recording {
+            let suffix = micAlert.map { " · ⚠︎ \($0)" } ?? " · \(Self.meter(micLevel))"
+            stateLabel.title = "● recording · \(elapsed ?? "0:00")" + suffix
+        } else {
+            stateLabel.title = "idle"
+        }
         toggleItem.title = recording ? "Stop recording" : "Start recording"
         statusItem.button?.contentTintColor = recording ? .systemRed : nil
+        // The status item is icon-only; a broken mic is the one thing worth
+        // stealing space in the menu bar for.
+        statusItem.button?.title = (recording && micAlert != nil) ? " ⚠︎" : ""
+    }
+
+    /// Five blocks over a −60…0 dBFS scale. Peak, not RMS: we're answering
+    /// "is anything arriving at all", not metering a mix.
+    private static func meter(_ level: Float) -> String {
+        let filled: Int
+        if level <= 0 {
+            filled = 0
+        } else {
+            let db = 20 * log10(max(level, 1e-6))
+            filled = Int((max(0, min(1, (db + 60) / 60)) * 5).rounded())
+        }
+        return String(repeating: "▅", count: filled) + String(repeating: "▁", count: 5 - filled)
     }
 
     /// Show transcription progress/failure as a second status line in the

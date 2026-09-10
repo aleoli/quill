@@ -210,11 +210,11 @@ enum Config {
         load()?["llm"] as? [String: Any]
     }
 
-    /// Apple voice processing (acoustic echo cancellation) on the mic, so
-    /// speaker playback doesn't bleed into the mic track and get transcribed
-    /// as "me". Default off — the live voice unit ducks all other playback,
-    /// and on headphones there's no echo to cancel anyway. Set true when
-    /// recording meetings through the speakers.
+    /// Apple voice processing (acoustic echo cancellation) on the mic.
+    /// No longer honoured: it lives on `AVAudioEngine`, which `MicRecorder`
+    /// abandoned because it cannot open an input device that isn't backed by
+    /// the default output (rca-002). Still read so a config that sets it gets
+    /// a warning instead of silently different behaviour.
     static func micVoiceProcessing() -> Bool {
         load()?["mic_voice_processing"] as? Bool ?? false
     }

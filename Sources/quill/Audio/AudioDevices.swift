@@ -11,9 +11,14 @@ struct AudioInputDevice: Hashable, Sendable {
     let name: String
 }
 
-/// Core Audio device enumeration helpers. AVAudioEngine's `inputNode` always
-/// binds to the system default input; to point it at a specific device we need
-/// the underlying `AudioDeviceID`, which we look up here.
+/// Core Audio device enumeration helpers. `MicRecorder` binds the engine's
+/// input node to a specific device through its AudioUnit, which needs the
+/// underlying `AudioDeviceID` — that's what we look up here.
+///
+/// Deliberately no setter for the system default input device: pointing
+/// AVAudioEngine at a device by swapping the machine's default is what killed
+/// the mic tap in rca-002, and it mutates a global the user owns. Bind the
+/// AudioUnit instead.
 enum AudioDevices {
     /// All devices that currently expose at least one input stream channel,
     /// sorted by name for a stable menu order. Cheap enough to call every
@@ -32,6 +37,7 @@ enum AudioDevices {
     }
 
     /// The system default input device, or nil if Core Audio reports none.
+    /// Read-only, and only for display — see the note above.
     static func defaultInputDeviceID() -> AudioDeviceID? {
         var address = AudioObjectPropertyAddress(
             mSelector: kAudioHardwarePropertyDefaultInputDevice,
@@ -55,41 +61,6 @@ enum AudioDevices {
             return device.id
         }
         return nil
-    }
-
-    /// Temporarily set the system default input device. Used by `MicRecorder`
-    /// to point `AVAudioEngine.inputNode` (which always binds to the system
-    /// default) at a specific device — `setDeviceID` on the underlying AU is
-    /// unreliable and often produces silence. Returns the previous default so
-    /// the caller can restore it when recording stops.
-    @discardableResult
-    static func setDefaultInputDevice(_ id: AudioDeviceID) -> AudioDeviceID? {
-        let previous = defaultInputDeviceID()
-        var address = AudioObjectPropertyAddress(
-            mSelector: kAudioHardwarePropertyDefaultInputDevice,
-            mScope: kAudioObjectPropertyScopeGlobal,
-            mElement: kAudioObjectPropertyElementMain
-        )
-        var newID = id
-        let status = AudioObjectSetPropertyData(
-            AudioObjectID(kAudioObjectSystemObject),
-            &address, 0, nil,
-            UInt32(MemoryLayout<AudioDeviceID>.size), &newID
-        )
-        if status != noErr {
-            FileHandle.standardError.write(Data(
-                "warning: couldn't set default input device to \(id) (status \(status))\n".utf8
-            ))
-            return nil
-        }
-        return previous
-    }
-
-    /// Restore the system default input device to a previously saved id.
-    /// No-op if `id` is nil (e.g. the original default couldn't be read).
-    static func restoreDefaultInputDevice(_ id: AudioDeviceID?) {
-        guard let id else { return }
-        setDefaultInputDevice(id)
     }
 
     /// Human-readable name for a device id, for logging. nil on failure.

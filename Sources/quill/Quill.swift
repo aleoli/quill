@@ -172,6 +172,9 @@ final class AppController {
     /// AudioDeviceID at recording start, since the id is only valid for the
     /// current process lifetime.
     private var selectedMicUID: String?
+    /// Latest health reported by the mic recorder. Drives the menu-bar warning
+    /// and gates notifications so a flapping route can't spam the user.
+    private var micHealth = MicRecorder.Health.live
 
     init(root: URL) {
         self.root = root
@@ -245,14 +248,11 @@ final class AppController {
                 "warning: selected mic device \(selectedMicUID) not found — using system default\n".utf8
             ))
         }
-        // If the resolved device IS the system default, treat it as "no
-        // preference". Passing a non-nil deviceID that equals the default
-        // to MicRecorder is a no-op for the swap, but keeps the recorder on
-        // a code path where AVAudioEngine's input node binding can behave
-        // differently from the nil (system default) path — occasionally
-        // producing silence. Collapsing to nil makes the two paths
-        // literally identical.
-        let deviceID = (resolvedID == AudioDevices.defaultInputDeviceID()) ? nil : resolvedID
+        // Pass the resolved id through even when it happens to be the current
+        // system default: MicRecorder binds the AudioUnit either way, so the
+        // device stays pinned for the session instead of following the default
+        // if it changes mid-meeting.
+        let deviceID = resolvedID
 
         // Create the session folder synchronously (fast, filesystem only).
         // The actual engine start runs in the Task below so a blocking
@@ -265,6 +265,13 @@ final class AppController {
             notifyUser(title: "quill — recording failed", body: "\(error)")
             starting = false
             return
+        }
+
+        micHealth = .live
+        newSession.setMicStatusHandler { health in
+            Task { @MainActor [weak self] in
+                self?.micHealthChanged(health)
+            }
         }
 
         let dir = newSession.dir
@@ -330,8 +337,36 @@ final class AppController {
         guard let session else { return }
         menuBar.update(
             recording: true,
-            elapsed: Self.format(Date().timeIntervalSince(session.startedAt))
+            elapsed: Self.format(Date().timeIntervalSince(session.startedAt)),
+            micLevel: session.micLevel,
+            micAlert: micHealth.alert
         )
+    }
+
+    /// The mic recorder reported a change in the track's health. A mic that
+    /// isn't capturing is worth interrupting the user for: it's the difference
+    /// between losing your own half of a meeting and noticing in time to fix
+    /// the device. The recorder only reports transitions, so this can't spam.
+    private func micHealthChanged(_ health: MicRecorder.Health) {
+        guard health != micHealth else { return }
+        micHealth = health
+        switch health {
+        case .live, .rebuilding:
+            break
+        case .substituted(let name):
+            notifyUser(
+                title: "quill — using a different mic",
+                body: "The selected input device couldn't be opened. Recording \(name) instead."
+            )
+        case .silent:
+            notifyUser(
+                title: "quill — mic has no signal",
+                body: "The mic track is silent. Check that the device isn't muted."
+            )
+        case .dead(let reason):
+            notifyUser(title: "quill — mic not recording", body: reason)
+        }
+        if session != nil { tick() }
     }
 
     private func openFolder() {
